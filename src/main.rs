@@ -1,4 +1,4 @@
-use btleplug::{platform::Manager, api::{Manager as _, Central, ScanFilter, Peripheral}};
+use btleplug::{platform::{Manager, Adapter, Peripheral}, api::{Manager as _, Central, ScanFilter, Peripheral as _}};
 use std::{error::Error, time::Duration};
 use tokio::time;
 
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     central.start_scan(ScanFilter::default()).await.unwrap();
 
-    time::sleep(Duration::from_secs(2)).await;
+    time::sleep(Duration::from_secs(1)).await;
 
     for p in central.peripherals().await.unwrap() {
         let name  = p.properties().await.unwrap().unwrap().local_name;
@@ -23,10 +23,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Some(name) => println!("{}", name),
             None => (),
         }
-        
-
     }
+
+    let light = find_light(&central).await.unwrap();
 
     Ok(())
 
+}
+
+async fn find_light(central: &Adapter) -> Option<Peripheral> {
+    for p in central.peripherals().await.unwrap() {
+        if p.properties()
+            .await
+            .unwrap()
+            .unwrap()
+            .local_name
+            .iter()
+            .any(|name| name.contains("48EA"))
+        {
+            return Some(p);
+        }
+    }
+    None
 }
