@@ -11,3 +11,4 @@ btleplug = "0.9.2"
 hex = "0.4.3"
 nokhwa = {version="0.9.4", features = ["input-msmf"]}
 image ="0.23.14"
+color-thief = "0.2.1"

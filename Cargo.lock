@@ -185,6 +185,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "color-thief"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "720cc3cf333a5de6196c41c9824d80553bdbb491cb802e67be6bdd9dfd1e9df8"
+dependencies = [
+ "rgb",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -602,6 +611,7 @@ name = "lights"
 version = "0.1.0"
 dependencies = [
  "btleplug",
+ "color-thief",
  "hex",
  "image",
  "nokhwa",

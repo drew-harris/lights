@@ -10,6 +10,8 @@ use nokhwa::*;
 use std::{error::Error, time::Duration};
 use tokio::time;
 
+const UPDATE_LIGHTS: bool = true;
+
 struct Light {
     device: Peripheral,
     charis: Characteristic,
@@ -65,10 +67,6 @@ async fn get_devices(matchNames: Vec<String>) -> Result<Vec<Light>, Box<dyn Erro
             p.discover_services().await?;
 
             let chars = p.characteristics();
-            for charis in chars.iter() {
-                println!("{}", &charis.uuid.to_short_string());
-            }
-
             let char_cmd = chars
                 .iter()
                 .find(|c| {
@@ -90,16 +88,13 @@ async fn get_devices(matchNames: Vec<String>) -> Result<Vec<Light>, Box<dyn Erro
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let lights = match get_devices(vec!["48EA".to_string(), String::from("6072")]).await {
+    let matches = vec!["48EA".to_string(), "6072".to_string(), "6146".to_string()];
+    let lights = match get_devices(matches).await {
         Ok(lights) => lights,
         Err(_err) => panic!("Could not get devices"),
     };
 
-    let light = &lights[0];
     println!("Found {} Lights", lights.len());
-    for light in lights.iter() {
-        light.set_color(13, 13, 13).await?;
-    }
 
     let mut camera = Camera::new(
         0,
@@ -112,40 +107,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let image = camera.frame().unwrap();
         // Get average color
-        let average = get_average_color(&image);
-        if average.1 < 10 {
+        let average = get_average_color(image);
+        if average.1 < 4 {
             break;
         }
-        println!("{}, {}, {}", average.0, average.1, average.2);
-        for light in lights.iter() {
-            light.set_color(average.0, average.1, average.2).await?;
+
+        if UPDATE_LIGHTS {
+            for light in lights.iter() {
+                light.set_color(average.0, average.1, average.2).await?;
+            }
         }
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    light.device.disconnect().await?;
+    for light in lights.iter() {
+        light.device.disconnect().await?;
+    }
+
     println!("Disconnected");
 
     Ok(())
 }
 
-fn get_average_color(image: &ImageBuffer<image::Rgb<u8>, std::vec::Vec<u8>>) -> (u8, u8, u8) {
-    let mut r: u128 = 0;
-    let mut g: u128 = 0;
-    let mut b: u128 = 0;
-    let mut count: u128 = 0;
+fn get_average_color(image: ImageBuffer<image::Rgb<u8>, std::vec::Vec<u8>>) -> (u8, u8, u8) {
+    // Use color-thief
+    let pallette =
+        color_thief::get_palette(&image.into_vec(), color_thief::ColorFormat::Rgb, 3, 2).unwrap();
 
-    for x in (0..image.width()).step_by(8) {
-        for y in (0..image.height()).step_by(8) {
-            let pixel = image.get_pixel(x, y);
-            r += pixel[0] as u128;
-            g += pixel[1] as u128;
-            b += pixel[2] as u128;
-            count += 1;
-        }
-    }
-
-    ((r / count) as u8, (g / count) as u8, (b / count) as u8)
+    println!(
+        "R: {}, G: {}, B: {}",
+        pallette[0].r, pallette[0].g, pallette[0].b
+    );
+    return (pallette[0].r, pallette[0].g, pallette[0].b);
 }
 
 fn fill_and_sum(input_cmd: &mut Vec<u8>) {
@@ -159,5 +152,4 @@ fn fill_and_sum(input_cmd: &mut Vec<u8>) {
         sum = sum ^ i;
     }
     input_cmd.push(sum);
-    println!("Command IS: {}", hex::encode(input_cmd));
 }
