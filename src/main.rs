@@ -3,7 +3,7 @@ use btleplug::{
         bleuuid::BleUuid, Central, Characteristic, Manager as _, Peripheral as _, ScanFilter,
         WriteType::WithoutResponse,
     },
-    platform::{Adapter, Manager, Peripheral},
+    platform::{Manager, Peripheral},
 };
 use image::ImageBuffer;
 use nokhwa::*;
@@ -19,8 +19,8 @@ struct Light {
 
 impl Light {
     async fn set_color(&self, r: u8, g: u8, b: u8) -> Result<(), btleplug::Error> {
-        let mut cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
-        self.send_raw_command(cmd).await?;
+        let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
+        self.send_raw_command(cmd).await.ok();
         Ok(())
     }
 
@@ -33,7 +33,7 @@ impl Light {
     }
 }
 
-async fn get_devices(matchNames: Vec<String>) -> Result<Vec<Light>, Box<dyn Error>> {
+async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Error>> {
     let mut lights = Vec::new();
 
     let manager = Manager::new().await.unwrap();
@@ -55,25 +55,35 @@ async fn get_devices(matchNames: Vec<String>) -> Result<Vec<Light>, Box<dyn Erro
 
         let mut matched = false;
 
-        for matchCode in matchNames.iter() {
-            if name.contains(matchCode) {
+        for match_code in match_names.iter() {
+            if name.contains(match_code) {
                 matched = true;
             }
         }
 
         if matched {
-            p.connect().await.unwrap();
+            // Connect or continue if failed
+            let result = p.connect().await;
+            match result {
+                Ok(_device) => {
+                    print!("Connected");
+                }
+                Err(_e) => {
+                    continue;
+                }
+            };
             println!("Connected");
             p.discover_services().await?;
 
             let chars = p.characteristics();
-            let char_cmd = chars
-                .iter()
-                .find(|c| {
-                    c.uuid.to_short_string() == "00010203-0405-0607-0809-0a0b0c0d2b11".to_string()
-                })
-                .unwrap()
-                .clone();
+            let char_cmd = match chars.iter().find(|c| {
+                c.uuid.to_short_string() == "00010203-0405-0607-0809-0a0b0c0d2b11".to_string()
+            }) {
+                Some(c) => c.clone(),
+                None => {
+                    continue;
+                }
+            };
 
             let light = Light {
                 device: p,
@@ -88,7 +98,12 @@ async fn get_devices(matchNames: Vec<String>) -> Result<Vec<Light>, Box<dyn Erro
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let matches = vec!["48EA".to_string(), "6072".to_string(), "6146".to_string()];
+    let matches = vec![
+        "48EA".to_string(),
+        "6072".to_string(),
+        // "6146".to_string(),
+        // "6142".to_string(),
+    ];
     let lights = match get_devices(matches).await {
         Ok(lights) => lights,
         Err(_err) => panic!("Could not get devices"),
