@@ -5,6 +5,7 @@ use btleplug::{
     },
     platform::{Manager, Peripheral},
 };
+use colorsys::{ColorTransform, ColorTuple, Hsl, Rgb};
 use image::ImageBuffer;
 use nokhwa::*;
 use std::{error::Error, time::Duration};
@@ -101,7 +102,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let matches = vec![
         "48EA".to_string(),
         "6072".to_string(),
-        // "6146".to_string(),
+        "6146".to_string(),
         // "6142".to_string(),
     ];
     let lights = match get_devices(matches).await {
@@ -110,6 +111,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     println!("Found {} Lights", lights.len());
+
+    for light in lights.iter() {
+        light.set_color(255, 0, 0).await.unwrap();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    for light in lights.iter() {
+        light.set_color(0, 255, 0).await.unwrap();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    for light in lights.iter() {
+        light.set_color(0, 0, 255).await.unwrap();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
 
     let mut camera = Camera::new(
         0,
@@ -123,9 +137,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let image = camera.frame().unwrap();
         // Get average color
         let average = get_average_color(image);
-        if average.1 < 4 {
-            break;
-        }
 
         if UPDATE_LIGHTS {
             for light in lights.iter() {
@@ -146,14 +157,42 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 fn get_average_color(image: ImageBuffer<image::Rgb<u8>, std::vec::Vec<u8>>) -> (u8, u8, u8) {
     // Use color-thief
+
+    // Get sample of 100 pixels
+    let mut sample = Vec::new();
+
+    for x in (0..image.width()).step_by(10) {
+        for y in (0..image.height()).step_by(10) {
+            let pixel = image.get_pixel(x, y);
+            sample.push(pixel[0]);
+            sample.push(pixel[1]);
+            sample.push(pixel[2]);
+        }
+    }
+
     let pallette =
-        color_thief::get_palette(&image.into_vec(), color_thief::ColorFormat::Rgb, 3, 2).unwrap();
+        color_thief::get_palette(&sample[..], color_thief::ColorFormat::Rgb, 3, 2).unwrap();
+    // color_thief::get_palette(&image.into_vec(), color_thief::ColorFormat::Rgb, 3, 2).unwrap();
 
     println!(
         "R: {}, G: {}, B: {}",
         pallette[0].r, pallette[0].g, pallette[0].b
     );
-    return (pallette[0].r, pallette[0].g, pallette[0].b);
+
+    let mut rgb: Rgb = (pallette[0].r, pallette[0].g, pallette[0].b).into();
+    // Convert to HSV
+    let mut hsl: Hsl = rgb.into();
+
+    // Boost saturation
+    hsl.set_saturation(hsl.saturation() * 1.5);
+    if (hsl.saturation() > 210.0) {
+        hsl.set_saturation(210.0);
+    }
+
+    // Convert back to RGB
+    rgb = hsl.into();
+
+    return (rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8);
 }
 
 fn fill_and_sum(input_cmd: &mut Vec<u8>) {
