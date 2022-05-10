@@ -11,6 +11,7 @@ use std::{error::Error, time::Duration};
 use tokio::time;
 
 const UPDATE_LIGHTS: bool = true;
+const SENSITIVITY: i32 = 2;
 
 struct Light {
     device: Peripheral,
@@ -30,6 +31,14 @@ impl Light {
     async fn set_color_slowly(&mut self, r: u8, g: u8, b: u8) -> Result<(), btleplug::Error> {
         let target_color = (r, g, b);
         let current_color = self.current_color;
+
+        if i32::abs((current_color.0 as i32 - target_color.0 as i32)) < SENSITIVITY {
+            if i32::abs((current_color.1 as i32 - target_color.1 as i32)) < SENSITIVITY {
+                if i32::abs((current_color.2 as i32 - target_color.2 as i32)) < SENSITIVITY {
+                    return Ok(());
+                }
+            }
+        }
 
         let red: u8 = ((current_color.0 as i16 + target_color.0 as i16) / 2) as u8;
         let green: u8 = ((current_color.1 as i16 + target_color.1 as i16) / 2) as u8;
@@ -154,19 +163,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         highgui::imshow("test", &frame).unwrap();
 
         let before = time::Instant::now();
-        let average = get_average_color(frame, lights.len() as u8);
+        let average = get_average_color(frame, 1);
 
-        println!("{:?} GET COLOR", before.elapsed());
+        // println!("{:?} GET COLOR", before.elapsed());
 
         let before = std::time::Instant::now();
         if UPDATE_LIGHTS {
-            for light in lights.iter_mut() {
+            for (i, light) in lights.iter_mut().enumerate() {
                 light
-                    .set_color_slowly(average.0, average.1, average.2)
+                    .set_color_slowly(average[0].0, average[0].1, average[0].2)
                     .await?;
             }
         }
-        println!("{:?} UPDATE LIGHTS", before.elapsed());
+        // println!("{:?} UPDATE LIGHTS", before.elapsed());
 
         // Break on ESC key
         let key = highgui::wait_key(100)?;
@@ -184,22 +193,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn get_average_color(image: Mat, num_colors: u8) -> (u8, u8, u8) {
+fn get_average_color(image: Mat, num_colors: u8) -> Vec<(u8, u8, u8)> {
     let frame2 = image.data_bytes().unwrap();
 
-    let pallette =
-        color_thief::get_palette(&frame2, color_thief::ColorFormat::Rgb, 10, num_colors).unwrap();
-    let color: (u8, u8, u8) = (pallette[0].b, pallette[0].g, pallette[0].r);
-    // Boost saturation
-    let rgb = colorsys::Rgb::from(color);
-    let mut hsl = Hsl::from(rgb);
-    hsl.set_saturation(hsl.saturation() * 1.5);
-    if hsl.saturation() > 99.0 {
-        hsl.set_saturation(99.0);
-    }
-    let rgb = Rgb::from(hsl);
+    let mut colors = Vec::new();
 
-    (rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8)
+    let pallette = color_thief::get_palette(&frame2, color_thief::ColorFormat::Rgb, 3, 2).unwrap();
+    for p_color in pallette.iter() {
+        let color: (u8, u8, u8) = (p_color.b, p_color.g, p_color.r);
+        // Boostsaturation
+        let rgb = colorsys::Rgb::from(color);
+        let mut hsl = Hsl::from(rgb);
+        hsl.set_saturation(hsl.saturation() + 50.0);
+        if (hsl.lightness() > 40.0 || hsl.lightness() < 80.0) {
+            hsl.set_lightness((hsl.lightness() + 50.0 / 2.0));
+        }
+        let rgb = Rgb::from(hsl);
+
+        colors.push((rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8));
+    }
+
+    colors
 }
 
 fn fill_and_sum(input_cmd: &mut Vec<u8>) {
