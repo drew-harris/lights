@@ -5,7 +5,7 @@ use btleplug::{
     },
     platform::{Manager, Peripheral},
 };
-use colorsys::{ColorTransform, ColorTuple, Hsl, Rgb};
+use colorsys::{Hsl, Rgb};
 use image::ImageBuffer;
 use nokhwa::*;
 use std::{error::Error, time::Duration};
@@ -13,8 +13,8 @@ use tokio::time;
 
 const UPDATE_LIGHTS: bool = true;
 const SENSITIVITY: i32 = 3;
-const SHOW_WINDOW: bool = true;
 const SLOW_TRANSITION: bool = true;
+const MULTI_COLOR: bool = true;
 
 struct Light {
     device: Peripheral,
@@ -94,6 +94,8 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
             }
         };
 
+        println!("Found device: {}", name);
+
         let mut matched = false;
 
         for match_code in match_names.iter() {
@@ -113,7 +115,6 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
                     continue;
                 }
             };
-            println!("Connected");
             p.discover_services().await?;
 
             let chars = p.characteristics();
@@ -178,7 +179,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let image = camera.frame().unwrap();
         // Get average color
-        let average = get_average_color(image);
+        let averages = get_average_color(image, lights.len() as u8);
 
         if keep_alive_count % 10 == 0 {
             for light in lights.iter_mut() {
@@ -194,9 +195,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         keep_alive_count += 1;
 
         if UPDATE_LIGHTS {
-            for light in lights.iter_mut() {
+            for (i, light) in lights.iter_mut().enumerate() {
+                let mut index = match MULTI_COLOR {
+                    true => i,
+                    false => 0,
+                };
                 light
-                    .set_color_slowly(average.0, average.1, average.2)
+                    .set_color_slowly(averages[index].0, averages[index].1, averages[index].2)
                     .await?;
             }
         }
@@ -211,28 +216,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn get_average_color(image: ImageBuffer<image::Rgb<u8>, std::vec::Vec<u8>>) -> (u8, u8, u8) {
+fn get_average_color(
+    image: ImageBuffer<image::Rgb<u8>, std::vec::Vec<u8>>,
+    mut num_colors: u8,
+) -> Vec<(u8, u8, u8)> {
     // Use color-thief
 
     // Get sample of 100 pixels
+    let mut colors = vec![];
 
     let sample = image.to_vec();
 
+    if num_colors < 2 {
+        num_colors = 2;
+    }
+
     let pallette =
-        color_thief::get_palette(&sample[..], color_thief::ColorFormat::Rgb, 1, 2).unwrap();
-    // color_thief::get_palette(&image.into_vec(), color_thief::ColorFormat::Rgb, 3, 2).unwrap();
+        color_thief::get_palette(&sample[..], color_thief::ColorFormat::Rgb, 1, num_colors)
+            .unwrap();
 
-    let mut rgb: Rgb = (pallette[0].r, pallette[0].g, pallette[0].b).into();
-    // Convert to HSV
-    let mut hsl: Hsl = rgb.into();
+    for color in pallette {
+        let mut rgb: Rgb = (color.r, color.g, color.b).into();
+        // Convert to HSV
+        let mut hsl: Hsl = rgb.into();
 
-    // Boost saturation
-    hsl.set_saturation((hsl.saturation() * 1.5) + 32.0);
+        // Boost saturation
+        hsl.set_saturation((hsl.saturation() * 1.5) + 32.0);
 
-    // Convert back to RGB
-    rgb = hsl.into();
+        // Convert back to RGB
+        rgb = hsl.into();
 
-    return (rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8);
+        colors.push((rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8));
+    }
+    return colors;
 }
 
 fn fill_and_sum(input_cmd: &mut Vec<u8>) {
