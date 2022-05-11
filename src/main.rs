@@ -5,13 +5,16 @@ use btleplug::{
     },
     platform::{Manager, Peripheral},
 };
-use colorsys::{Hsl, Rgb};
-use opencv::{highgui, prelude::*, videoio, Result};
+use colorsys::{ColorTransform, ColorTuple, Hsl, Rgb};
+use image::ImageBuffer;
+use nokhwa::*;
 use std::{error::Error, time::Duration};
 use tokio::time;
 
 const UPDATE_LIGHTS: bool = true;
-const SENSITIVITY: i32 = 2;
+const SENSITIVITY: i32 = 3;
+const SHOW_WINDOW: bool = true;
+const SLOW_TRANSITION: bool = true;
 
 struct Light {
     device: Peripheral,
@@ -20,10 +23,14 @@ struct Light {
 }
 
 impl Light {
-    async fn set_color(&mut self, r: u8, g: u8, b: u8) -> Result<(), btleplug::Error> {
+    async fn set_color(&self, r: u8, g: u8, b: u8) -> Result<(), btleplug::Error> {
         let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
+        self.send_raw_command(cmd).await.ok();
+        Ok(())
+    }
 
-        self.current_color = (r, g, b);
+    async fn keep_alive(&self) -> Result<(), btleplug::Error> {
+        let cmd: Vec<u8> = vec![0xAA, 0x01];
         self.send_raw_command(cmd).await.ok();
         Ok(())
     }
@@ -32,21 +39,29 @@ impl Light {
         let target_color = (r, g, b);
         let current_color = self.current_color;
 
-        if i32::abs((current_color.0 as i32 - target_color.0 as i32)) < SENSITIVITY {
-            if i32::abs((current_color.1 as i32 - target_color.1 as i32)) < SENSITIVITY {
-                if i32::abs((current_color.2 as i32 - target_color.2 as i32)) < SENSITIVITY {
+        if i32::abs(current_color.0 as i32 - target_color.0 as i32) < SENSITIVITY {
+            if i32::abs(current_color.1 as i32 - target_color.1 as i32) < SENSITIVITY {
+                if i32::abs(current_color.2 as i32 - target_color.2 as i32) < SENSITIVITY {
                     return Ok(());
                 }
             }
         }
 
-        let red: u8 = ((current_color.0 as i16 + target_color.0 as i16) / 2) as u8;
-        let green: u8 = ((current_color.1 as i16 + target_color.1 as i16) / 2) as u8;
-        let blue: u8 = ((current_color.2 as i16 + target_color.2 as i16) / 2) as u8;
+        if SLOW_TRANSITION {
+            let red: u8 = ((current_color.0 as i16 + target_color.0 as i16) / 2) as u8;
+            let green: u8 = ((current_color.1 as i16 + target_color.1 as i16) / 2) as u8;
+            let blue: u8 = ((current_color.2 as i16 + target_color.2 as i16) / 2) as u8;
 
-        self.current_color = (red as u8, green as u8, blue as u8);
-        let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, red, green, blue];
+            self.current_color = (red as u8, green as u8, blue as u8);
+            let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, red, green, blue];
+            self.send_raw_command(cmd).await.ok();
+            return Ok(());
+        }
+        self.current_color = (r as u8, g as u8, b as u8);
+        let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
         self.send_raw_command(cmd).await.ok();
+        return Ok(());
+
         Ok(())
     }
 
@@ -111,7 +126,7 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
                 }
             };
 
-            let mut light = Light {
+            let light = Light {
                 device: p,
                 charis: char_cmd,
                 current_color: (0, 0, 0),
@@ -138,49 +153,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Found {} Lights", lights.len());
 
-    for light in lights.iter_mut() {
+    for light in lights.iter() {
         light.set_color(255, 0, 0).await.unwrap();
     }
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    for light in lights.iter_mut() {
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    for light in lights.iter() {
         light.set_color(0, 255, 0).await.unwrap();
     }
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    for light in lights.iter_mut() {
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    for light in lights.iter() {
         light.set_color(0, 0, 255).await.unwrap();
     }
+    std::thread::sleep(std::time::Duration::from_millis(400));
 
-    // List video devices with nokhwa
-
-    let mut cam = videoio::VideoCapture::new(1, videoio::CAP_ANY).unwrap();
+    let mut camera = Camera::new(
+        1,
+        Some(CameraFormat::new_from(640, 480, FrameFormat::MJPEG, 30)),
+    )
+    .unwrap();
 
     // Loop unless a key is pressed
+    let mut keep_alive_count = 0;
 
     loop {
-        // Grab a frame and display it
-        let mut frame = Mat::default();
-        cam.read(&mut frame).unwrap();
-        highgui::imshow("test", &frame).unwrap();
+        let image = camera.frame().unwrap();
+        // Get average color
+        let average = get_average_color(image);
 
-        let before = time::Instant::now();
-        let average = get_average_color(frame, 1);
+        if keep_alive_count % 10 == 0 {
+            for light in lights.iter_mut() {
+                match light.keep_alive().await {
+                    Ok(_) => {}
+                    Err(_) => {
+                        println!("Lost connection to light");
+                    }
+                }
+            }
+            keep_alive_count = 0;
+        }
+        keep_alive_count += 1;
 
-        // println!("{:?} GET COLOR", before.elapsed());
-
-        let before = std::time::Instant::now();
         if UPDATE_LIGHTS {
-            for (i, light) in lights.iter_mut().enumerate() {
+            for light in lights.iter_mut() {
                 light
-                    .set_color_slowly(average[0].0, average[0].1, average[0].2)
+                    .set_color_slowly(average.0, average.1, average.2)
                     .await?;
             }
-        }
-        // println!("{:?} UPDATE LIGHTS", before.elapsed());
-
-        // Break on ESC key
-        let key = highgui::wait_key(100)?;
-        if key == 27 {
-            break;
         }
     }
 
@@ -193,27 +211,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn get_average_color(image: Mat, num_colors: u8) -> Vec<(u8, u8, u8)> {
-    let frame2 = image.data_bytes().unwrap();
+fn get_average_color(image: ImageBuffer<image::Rgb<u8>, std::vec::Vec<u8>>) -> (u8, u8, u8) {
+    // Use color-thief
 
-    let mut colors = Vec::new();
+    // Get sample of 100 pixels
 
-    let pallette = color_thief::get_palette(&frame2, color_thief::ColorFormat::Rgb, 3, 2).unwrap();
-    for p_color in pallette.iter() {
-        let color: (u8, u8, u8) = (p_color.b, p_color.g, p_color.r);
-        // Boostsaturation
-        let rgb = colorsys::Rgb::from(color);
-        let mut hsl = Hsl::from(rgb);
-        hsl.set_saturation(hsl.saturation() + 50.0);
-        if (hsl.lightness() > 40.0 || hsl.lightness() < 80.0) {
-            hsl.set_lightness((hsl.lightness() + 50.0 / 2.0));
-        }
-        let rgb = Rgb::from(hsl);
+    let sample = image.to_vec();
 
-        colors.push((rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8));
-    }
+    let pallette =
+        color_thief::get_palette(&sample[..], color_thief::ColorFormat::Rgb, 1, 2).unwrap();
+    // color_thief::get_palette(&image.into_vec(), color_thief::ColorFormat::Rgb, 3, 2).unwrap();
 
-    colors
+    let mut rgb: Rgb = (pallette[0].r, pallette[0].g, pallette[0].b).into();
+    // Convert to HSV
+    let mut hsl: Hsl = rgb.into();
+
+    // Boost saturation
+    hsl.set_saturation((hsl.saturation() * 1.5) + 32.0);
+
+    // Convert back to RGB
+    rgb = hsl.into();
+
+    return (rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8);
 }
 
 fn fill_and_sum(input_cmd: &mut Vec<u8>) {
