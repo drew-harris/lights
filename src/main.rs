@@ -14,7 +14,7 @@ use tokio::time;
 const UPDATE_LIGHTS: bool = true;
 const SENSITIVITY: i32 = 3;
 const SLOW_TRANSITION: bool = true;
-const MULTI_COLOR: bool = true;
+const MULTI_COLOR: bool = false;
 
 struct Light {
     device: Peripheral,
@@ -196,7 +196,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         if UPDATE_LIGHTS {
             for (i, light) in lights.iter_mut().enumerate() {
-                let mut index = match MULTI_COLOR {
+                let index = match MULTI_COLOR {
                     true => i,
                     false => 0,
                 };
@@ -207,9 +207,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    for light in lights.iter() {
-        light.device.disconnect().await?;
-    }
+    // for light in lights.iter() {
+    //     light.device.disconnect().await?;
+    // }
 
     println!("Disconnected");
 
