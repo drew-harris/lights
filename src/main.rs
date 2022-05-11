@@ -39,12 +39,11 @@ impl Light {
         let target_color = (r, g, b);
         let current_color = self.current_color;
 
-        if i32::abs(current_color.0 as i32 - target_color.0 as i32) < SENSITIVITY {
-            if i32::abs(current_color.1 as i32 - target_color.1 as i32) < SENSITIVITY {
-                if i32::abs(current_color.2 as i32 - target_color.2 as i32) < SENSITIVITY {
-                    return Ok(());
-                }
-            }
+        if i32::abs(current_color.1 as i32 - target_color.1 as i32) < SENSITIVITY
+            && i32::abs(current_color.2 as i32 - target_color.2 as i32) < SENSITIVITY
+            && i32::abs(current_color.2 as i32 - target_color.2 as i32) < SENSITIVITY
+        {
+            return Ok(());
         }
 
         if SLOW_TRANSITION {
@@ -60,8 +59,6 @@ impl Light {
         self.current_color = (r as u8, g as u8, b as u8);
         let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
         self.send_raw_command(cmd).await.ok();
-        return Ok(());
-
         Ok(())
     }
 
@@ -70,7 +67,7 @@ impl Light {
         self.device
             .write(&self.charis, &cmd, WithoutResponse)
             .await?;
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -81,7 +78,7 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
 
     // get the first bluetooth adapter
     let adapters = manager.adapters().await?;
-    let central = adapters.into_iter().nth(0).unwrap();
+    let central = adapters.into_iter().next().unwrap();
     central.start_scan(ScanFilter::default()).await.unwrap();
     time::sleep(Duration::from_secs(1)).await;
 
@@ -118,9 +115,10 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
             p.discover_services().await?;
 
             let chars = p.characteristics();
-            let char_cmd = match chars.iter().find(|c| {
-                c.uuid.to_short_string() == "00010203-0405-0607-0809-0a0b0c0d2b11".to_string()
-            }) {
+            let char_cmd = match chars
+                .iter()
+                .find(|c| c.uuid.to_short_string() == *"00010203-0405-0607-0809-0a0b0c0d2b11")
+            {
                 Some(c) => c.clone(),
                 None => {
                     continue;
@@ -136,7 +134,7 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
             lights.push(light);
         }
     }
-    return Ok(lights);
+    Ok(lights)
 }
 
 #[tokio::main]
@@ -211,9 +209,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //     light.device.disconnect().await?;
     // }
 
-    println!("Disconnected");
+    // println!("Disconnected");
 
-    Ok(())
+    // Ok(())
 }
 
 fn get_average_color(
@@ -248,7 +246,7 @@ fn get_average_color(
 
         colors.push((rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8));
     }
-    return colors;
+    colors
 }
 
 fn fill_and_sum(input_cmd: &mut Vec<u8>) {
@@ -259,7 +257,7 @@ fn fill_and_sum(input_cmd: &mut Vec<u8>) {
 
     let mut sum = 0;
     for i in input_cmd.iter() {
-        sum = sum ^ i;
+        sum ^= i;
     }
     input_cmd.push(sum);
 }
