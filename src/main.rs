@@ -6,6 +6,7 @@ use btleplug::{
     platform::{Manager, Peripheral},
 };
 use colorsys::{Hsl, Rgb};
+use crossterm::event::{poll, read, Event};
 use image::ImageBuffer;
 use nokhwa::*;
 use std::{error::Error, time::Duration};
@@ -25,13 +26,13 @@ struct Light {
 impl Light {
     async fn set_color(&self, r: u8, g: u8, b: u8) -> Result<(), btleplug::Error> {
         let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
-        self.send_raw_command(cmd).await.ok();
+        self.send_raw_command(cmd).await?;
         Ok(())
     }
 
     async fn keep_alive(&self) -> Result<(), btleplug::Error> {
         let cmd: Vec<u8> = vec![0xAA, 0x01];
-        self.send_raw_command(cmd).await.ok();
+        self.send_raw_command(cmd).await?;
         Ok(())
     }
 
@@ -58,7 +59,7 @@ impl Light {
         }
         self.current_color = (r as u8, g as u8, b as u8);
         let cmd: Vec<u8> = vec![0x33, 0x05, 0x02, r, g, b];
-        self.send_raw_command(cmd).await.ok();
+        self.send_raw_command(cmd).await?;
         Ok(())
     }
 
@@ -91,8 +92,6 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
             }
         };
 
-        println!("Found device: {}", name);
-
         let mut matched = false;
 
         for match_code in match_names.iter() {
@@ -102,11 +101,12 @@ async fn get_devices(match_names: Vec<String>) -> Result<Vec<Light>, Box<dyn Err
         }
 
         if matched {
+            print!("{}: ", name);
             // Connect or continue if failed
             let result = p.connect().await;
             match result {
                 Ok(_device) => {
-                    print!("Connected");
+                    println!("Connected");
                 }
                 Err(_e) => {
                     continue;
@@ -143,7 +143,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "48EA".to_string(),
         "6072".to_string(),
         "6146".to_string(),
-        // "6142".to_string(),
+        //"6142".to_string(),
     ];
     let mut lights = match get_devices(matches).await {
         Ok(lights) => lights,
@@ -192,26 +192,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         keep_alive_count += 1;
 
-        if UPDATE_LIGHTS {
-            for (i, light) in lights.iter_mut().enumerate() {
-                let index = match MULTI_COLOR {
-                    true => i,
-                    false => 0,
-                };
-                light
-                    .set_color_slowly(averages[index].0, averages[index].1, averages[index].2)
-                    .await?;
+        for (i, light) in lights.iter_mut().enumerate() {
+            let mut index = 0;
+            if MULTI_COLOR {
+                index = i;
+            }
+
+            light
+                .set_color_slowly(averages[index].0, averages[index].1, averages[index].2)
+                .await?;
+        }
+
+        if poll(Duration::from_millis(1))? {
+            if let Event::Key(crossterm::event::KeyEvent {
+                code: crossterm::event::KeyCode::Esc,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            }) = read()?
+            {
+                break;
             }
         }
     }
 
-    // for light in lights.iter() {
-    //     light.device.disconnect().await?;
-    // }
+    for light in lights.iter() {
+        light.device.disconnect().await?;
+    }
 
-    // println!("Disconnected");
+    println!("Disconnected");
 
-    // Ok(())
+    Ok(())
 }
 
 fn get_average_color(

@@ -13,3 +13,4 @@ nokhwa = {version="0.9.4", features = ["input-msmf"]}
 image ="0.23.14"
 color-thief = "0.2.1"
 colorsys = "0.6.5"
+crossterm = "0.23.2"
